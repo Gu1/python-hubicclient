@@ -22,7 +22,7 @@ from errno import EEXIST, ENOENT
 from hashlib import md5
 from optparse import OptionParser, SUPPRESS_HELP
 from os import environ, listdir, makedirs, utime, _exit as os_exit
-from os.path import basename, dirname, getmtime, getsize, isdir, join
+from os.path import basename, dirname, getmtime, getsize, isdir, join, exists as path_exists
 from Queue import Empty, Queue
 from random import shuffle
 from sys import argv, exc_info, exit, stderr, stdout
@@ -337,6 +337,10 @@ def st_download(parser, args, print_queue, error_queue):
     parser.add_option('', '--no-download', action='store_true',
                       default=False, help="Perform download(s), but don't "
                       "actually write anything to disk")
+    parser.add_option('', '--verified-overwrite', action='store_true', dest='verifiedoverwrite',
+                      default=False, help="If file exists, check the checksum, download and overwrite "
+                      "if different")
+
     (options, args) = parse_args(parser, args)
     args = args[1:]
     if options.out_file == '-':
@@ -350,6 +354,14 @@ def st_download(parser, args, print_queue, error_queue):
 
     object_queue = Queue(10000)
 
+    def _read_in_chunks(file_obj, chunk_size=1024):
+        while True:
+            data = file_obj.read(chunk_size)
+            if not data:
+                break
+            yield data
+
+
     def _download_object(queue_arg, conn):
         if len(queue_arg) == 2:
             container, obj = queue_arg
@@ -359,6 +371,38 @@ def st_download(parser, args, print_queue, error_queue):
         else:
             raise Exception("Invalid queue_arg length of %s" % len(queue_arg))
         try:
+            if options.verifiedoverwrite and path_exists(obj):
+                if not isdir(obj):
+                    verify_start_time = time()
+                    # check the checksums match
+                    headers = conn.head_object(container, obj)
+                    verify_header_receipt = time()
+                    md5sum_remote = headers['etag']
+                    md5sum_file = md5()
+                    localfile = open(obj,'r')
+                    chunksize = 1024*1024*4
+                    read_length = 0
+                    for chunk in _read_in_chunks(localfile,chunksize):
+                        read_length = len(chunk)
+                        md5sum_file.update(chunk)
+                    verify_finish_time = time()
+                    verify_time_str = 'headers %.3fs, total %.3fs, %.3fs MB/s' % (
+                                      verify_header_receipt - verify_start_time,
+                                      verify_finish_time - verify_start_time,
+                                      float(read_length) / (verify_finish_time -
+                                      verify_start_time) / 1000000)
+
+                    #if matching skip
+                    if md5sum_remote == md5sum_file.hexdigest():
+                        if options.verbose:
+                            print obj +' [ Verified Skipping %s ] %s ' % ( md5sum_remote,
+                                  verify_time_str)
+                        return
+                    else:
+                        if options.verbose:
+                            print obj +' [ Overwriting local %s remote %s] %s ' % \
+                                  (md5sum_file.hexdigest(), md5sum_remote,verify_time_str)
+                        # continue through and get the file
             start_time = time()
             headers, body = \
                 conn.get_object(container, obj, resp_chunk_size=65536)
