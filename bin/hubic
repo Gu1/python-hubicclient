@@ -374,7 +374,7 @@ def st_download(parser, args, print_queue, error_queue):
                 path = path[1:]
             md5sum = None
             make_dir = not options.no_download and out_file != "-"
-            if content_type.split(';', 1)[0] == 'text/directory':
+            if content_type.split(';', 1)[0] in ('text/directory', 'application/directory'):
                 if make_dir and not isdir(path):
                     mkdirs(path)
                 read_length = 0
@@ -829,7 +829,8 @@ def st_upload(parser, args, print_queue, error_queue):
                         cl = int(headers.get('content-length'))
                         et = headers.get('etag')
                         mt = headers.get('x-object-meta-mtime')
-                        if ct.split(';', 1)[0] == 'text/directory' and \
+                        if ct.split(';', 1)[0] in ('text/directory',
+				'application/directory') and \
                                 cl == 0 and \
                                 et == 'd41d8cd98f00b204e9800998ecf8427e' and \
                                 mt == put_headers['x-object-meta-mtime']:
@@ -838,7 +839,7 @@ def st_upload(parser, args, print_queue, error_queue):
                         if err.http_status != 404:
                             raise
                 conn.put_object(container, obj, '', content_length=0,
-                                content_type='text/directory',
+                                content_type='application/directory',
                                 headers=put_headers)
             else:
                 # We need to HEAD all objects now in case we're overwriting a
